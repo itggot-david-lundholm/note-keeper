@@ -1,0 +1,5 @@
+.vagrant/**
+Vagrantfile
+Gemfile.lock
+.byebug_history
+*.zip
