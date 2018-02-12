@@ -1,6 +1,9 @@
+require_relative './model/model'
+
 class App < Sinatra::Base
 
 	enable :sessions
+	include TodoDB
 
 	def set_error(error_message)
 		session[:error] = error_message
@@ -29,14 +32,10 @@ class App < Sinatra::Base
 	end
 
 	get('/notes/:id/edit') do
-
-		if(session[:user_id])
-			db = SQLite3::Database.new('db/todo.sqlite')
-			db.results_as_hash = true
-	
-			result = db.execute("SELECT * FROM notes WHERE user_id=?", [session[:user_id]])
-			note = result.first
-
+		note_id = params[:id]
+		note = get_note(note_id)
+		user_id = session[:user_id] 
+		if(user_id && note["user_id"] == user_id.to_i)
 			slim(:edit_note, locals:{note:note})
 		else
 			redirect('/')
@@ -45,33 +44,25 @@ class App < Sinatra::Base
 	end
 
 	get('/notes') do
-		if(session[:user_id])
-			db = SQLite3::Database.new('db/todo.sqlite')
-			db.results_as_hash = true
-
-			result = db.execute("SELECT * FROM notes WHERE user_id=?", [session[:user_id]])
-
-			slim(:list_notes, locals:{notes:result})
+		user_id = session[:user_id] 
+		if user_id
+			notes = list_notes(user_id)
+			slim(:list_notes, locals:{notes:notes})
 		else
 			redirect('/')
 		end
 	end
 
 	post('/register') do
-		db = SQLite3::Database.new('db/todo.sqlite')
-		db.results_as_hash = true
-		
 		username = params["username"]
 		password = params["password"]
 		password_confirmation = params["confirm_password"]
 		
-		result = db.execute("SELECT id FROM users WHERE username=?", [username])
-		
-		if result.empty?
+		user = get_user(username)
+
+		if user.nil?
 			if password == password_confirmation
-				password_digest = BCrypt::Password.create(password)
-				
-				db.execute("INSERT INTO users(username, password_digest) VALUES (?,?)", [username, password_digest])
+				create_user(username, password)
 				redirect('/')
 			else
 				set_error("Passwords don't match")
@@ -80,26 +71,23 @@ class App < Sinatra::Base
 		else
 			set_error("Username already exists")
 			redirect('/error')
-		end
-		
+		end	
 	end
 	
 	
 	post('/login') do
-		db = SQLite3::Database.new('db/todo.sqlite')
-		db.results_as_hash = true
 		username = params["username"]
 		password = params["password"]
 		
-		result = db.execute("SELECT id, password_digest FROM users WHERE username=?", [username])
+		user = get_user(username)
 
-		if result.empty?
+		if user.nil?
 			set_error("Invalid Credentials")
 			redirect('/error')
 		end
-
-		user_id = result.first["id"]
-		password_digest = result.first["password_digest"]
+		user_id = user["id"]
+		password_digest = user["password_digest"]
+		
 		if BCrypt::Password.new(password_digest) == password
 			session[:user_id] = user_id
 			redirect('/notes')
@@ -115,12 +103,10 @@ class App < Sinatra::Base
 	end
 	
 	post('/notes/create') do
-		if session[:user_id]
-			db = SQLite3::Database.new('db/todo.sqlite')
-			db.results_as_hash = true
+		user_id = session[:user_id]
+		if user_id
 			content = params["content"]
-			
-			db.execute("INSERT INTO notes(user_id, content) VALUES (?,?)", [session[:user_id], content])
+			create_note(user_id, content)
 			redirect('/notes')
 		else
 			redirect('/')
@@ -128,32 +114,23 @@ class App < Sinatra::Base
 	end
 	
 	post('/notes/:id/delete') do
+		user_id = session[:user_id].to_i
 		if session[:user_id]
 			note_id = params[:id]
-			db = SQLite3::Database.new('db/todo.sqlite')
-			db.results_as_hash = true
-			result = db.execute("SELECT user_id FROM notes WHERE id=?",[note_id])
-			if result.first["user_id"] == session[:user_id]
-				db.execute("DELETE FROM notes WHERE id=?",[note_id])
-				redirect('/notes')
-			end
+			delete_note(user_id, note_id)
+			redirect('/notes')
 		else
 			redirect('/')
 		end
 	end
 	
 	post('/notes/:id/update') do
-		if session[:user_id]
+		user_id = session[:user_id]
+		if user_id
 			note_id = params[:id]
 			new_content = params["content"]
-
-			db = SQLite3::Database.new('db/todo.sqlite')
-			db.results_as_hash = true
-			result = db.execute("SELECT user_id FROM notes WHERE id=?",[note_id])
-			if result.first["user_id"] == session[:user_id]
-				db.execute("UPDATE notes SET content=? WHERE id=?",[new_content, note_id])
-				redirect('/notes')
-			end
+			update_note(user_id, note_id, new_content)
+			redirect('/notes')
 		else
 			redirect('/')
 		end
